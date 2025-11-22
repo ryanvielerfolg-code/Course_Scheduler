@@ -9,4 +9,8 @@ venv/
 *.egg-info/
 dist/
 build/
+uploads/
+outputs/
+server.log
+*.log
 

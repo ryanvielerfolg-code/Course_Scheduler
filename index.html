@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Course Scheduler - Schedule Your Course in 1 Minute</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            padding: 40px 20px;
+            margin-bottom: 40px;
+        }
+
+        h1 {
+            font-size: 3.5em;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 15px;
+            font-weight: 700;
+            letter-spacing: -1px;
+        }
+
+        .slogan {
+            font-size: 1.5em;
+            color: #a0a0a0;
+            font-weight: 300;
+            margin-top: 10px;
+        }
+
+        .upload-section {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            margin-bottom: 40px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .upload-area {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+            align-items: center;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+        }
+
+        .file-input-label {
+            display: block;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1.1em;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .file-input-label:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .file-input-label input[type="file"] {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        .file-name {
+            margin-top: 10px;
+            color: #a0a0a0;
+            font-size: 0.9em;
+        }
+
+        .submit-btn {
+            padding: 18px 50px;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            border: none;
+            border-radius: 15px;
+            color: white;
+            font-size: 1.2em;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .submit-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(245, 87, 108, 0.6);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .results-section {
+            display: none;
+            margin-top: 40px;
+        }
+
+        .results-section.active {
+            display: block;
+        }
+
+        .download-btn {
+            display: inline-block;
+            padding: 15px 40px;
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(79, 172, 254, 0.4);
+            text-decoration: none;
+            margin-bottom: 30px;
+        }
+
+        .download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(79, 172, 254, 0.6);
+        }
+
+        .timetable-container {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            overflow-x: auto;
+        }
+
+        .timetable {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0 auto;
+            min-width: 800px;
+        }
+
+        .timetable th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            text-align: center;
+            font-weight: 700;
+            font-size: 1.1em;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .timetable td {
+            padding: 20px;
+            text-align: center;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            vertical-align: top;
+            min-height: 100px;
+        }
+
+        .timetable tbody tr:nth-child(even) {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .course-cell {
+            margin: 8px 0;
+            padding: 12px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.3) 0%, rgba(118, 75, 162, 0.3) 100%);
+            border-left: 4px solid #667eea;
+            text-align: left;
+            transition: all 0.3s ease;
+        }
+
+        .course-cell:hover {
+            transform: translateX(5px);
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.5) 0%, rgba(118, 75, 162, 0.5) 100%);
+        }
+
+        .course-name {
+            font-weight: 700;
+            font-size: 1.05em;
+            color: #ffffff;
+            margin-bottom: 5px;
+        }
+
+        .course-details {
+            font-size: 0.85em;
+            color: #b0b0b0;
+            margin-top: 5px;
+        }
+
+        .course-details span {
+            display: inline-block;
+            margin-right: 10px;
+            padding: 3px 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+        }
+
+        .conflict-marker {
+            color: #ff6b6b;
+            font-weight: 700;
+            margin-left: 5px;
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            flex: 1;
+            min-width: 200px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #a0a0a0;
+            margin-bottom: 10px;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .error-message {
+            display: none;
+            background: rgba(255, 87, 87, 0.2);
+            border: 2px solid #ff5757;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            color: #ff5757;
+            text-align: center;
+        }
+
+        .error-message.active {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2.5em;
+            }
+
+            .slogan {
+                font-size: 1.2em;
+            }
+
+            .upload-section {
+                padding: 20px;
+            }
+
+            .timetable-container {
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Course Scheduler</h1>
+            <p class="slogan">Schedule your course in 1 minute</p>
+        </header>
+
+        <div class="upload-section">
+            <form id="uploadForm" enctype="multipart/form-data">
+                <div class="upload-area">
+                    <div class="file-input-wrapper">
+                        <label class="file-input-label">
+                            <input type="file" name="groupwise_file" accept=".xlsx" required>
+                            <span>📊 Upload Groupwise Course Tags (XLSX)</span>
+                        </label>
+                        <div class="file-name" id="groupwiseFileName"></div>
+                    </div>
+
+                    <div class="file-input-wrapper">
+                        <label class="file-input-label">
+                            <input type="file" name="students_file" accept=".csv" required>
+                            <span>👥 Upload Student Counts (CSV)</span>
+                        </label>
+                        <div class="file-name" id="studentsFileName"></div>
+                    </div>
+
+                    <button type="submit" class="submit-btn" id="submitBtn">
+                        Generate Schedule
+                    </button>
+                </div>
+            </form>
+
+            <div class="error-message" id="errorMessage"></div>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Processing your schedule... This may take a moment.</p>
+            </div>
+        </div>
+
+        <div class="results-section" id="resultsSection">
+            <div class="stats" id="stats"></div>
+            <a href="#" class="download-btn" id="downloadBtn" download>📥 Download Excel Schedule</a>
+            <div class="timetable-container">
+                <table class="timetable" id="timetable">
+                    <thead>
+                        <tr>
+                            <th>Time Slot</th>
+                            <th>Tuesday</th>
+                            <th>Wednesday</th>
+                            <th>Thursday</th>
+                            <th>Friday</th>
+                        </tr>
+                    </thead>
+                    <tbody id="timetableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('uploadForm');
+        const groupwiseInput = document.querySelector('input[name="groupwise_file"]');
+        const studentsInput = document.querySelector('input[name="students_file"]');
+        const groupwiseFileName = document.getElementById('groupwiseFileName');
+        const studentsFileName = document.getElementById('studentsFileName');
+        const submitBtn = document.getElementById('submitBtn');
+        const loading = document.getElementById('loading');
+        const resultsSection = document.getElementById('resultsSection');
+        const errorMessage = document.getElementById('errorMessage');
+        const timetableBody = document.getElementById('timetableBody');
+        const statsContainer = document.getElementById('stats');
+        const downloadBtn = document.getElementById('downloadBtn');
+
+        // Update file names when files are selected
+        groupwiseInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                groupwiseFileName.textContent = `Selected: ${e.target.files[0].name}`;
+            }
+        });
+
+        studentsInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                studentsFileName.textContent = `Selected: ${e.target.files[0].name}`;
+            }
+        });
+
+        // Handle form submission
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(form);
+            
+            // Reset UI
+            errorMessage.classList.remove('active');
+            resultsSection.classList.remove('active');
+            loading.classList.add('active');
+            submitBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/schedule', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to generate schedule');
+                }
+
+                // Display results
+                displayResults(data);
+                resultsSection.classList.add('active');
+                
+            } catch (error) {
+                errorMessage.textContent = error.message;
+                errorMessage.classList.add('active');
+            } finally {
+                loading.classList.remove('active');
+                submitBtn.disabled = false;
+            }
+        });
+
+        function displayResults(data) {
+            // Display stats
+            const stats = data.stats || {};
+            statsContainer.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">Total Courses</div>
+                    <div class="stat-value">${stats.totalCourses || 0}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Unassigned</div>
+                    <div class="stat-value">${stats.unassigned || 0}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Soft Conflicts</div>
+                    <div class="stat-value">${stats.softConflicts || 0}</div>
+                </div>
+            `;
+
+            // Display timetable
+            const timetable = data.timetable || {};
+            const days = ['Tue', 'Wed', 'Thu', 'Fri'];
+            const slots = ['AM', 'PM'];
+            
+            timetableBody.innerHTML = '';
+            
+            slots.forEach(slot => {
+                const row = document.createElement('tr');
+                const timeCell = document.createElement('td');
+                timeCell.textContent = slot;
+                timeCell.style.fontWeight = '700';
+                row.appendChild(timeCell);
+                
+                days.forEach(day => {
+                    const cell = document.createElement('td');
+                    const courses = timetable[slot]?.[day] || '';
+                    
+                    if (courses.trim()) {
+                        const courseLines = courses.split('\n').filter(line => line.trim());
+                        courseLines.forEach(line => {
+                            const courseDiv = document.createElement('div');
+                            courseDiv.className = 'course-cell';
+                            
+                            // Parse course information
+                            const match = line.match(/^(.+?)\s*\((.+?),\s*(.+?)\)(\s*\*)?$/);
+                            if (match) {
+                                const courseName = match[1];
+                                const room = match[2];
+                                const half = match[3];
+                                const hasConflict = match[4] !== undefined;
+                                
+                                courseDiv.innerHTML = `
+                                    <div class="course-name">
+                                        ${courseName}${hasConflict ? '<span class="conflict-marker">*</span>' : ''}
+                                    </div>
+                                    <div class="course-details">
+                                        <span>🏛️ ${room}</span>
+                                        <span>⏰ ${half}</span>
+                                    </div>
+                                `;
+                            } else {
+                                courseDiv.textContent = line;
+                            }
+                            
+                            cell.appendChild(courseDiv);
+                        });
+                    } else {
+                        cell.textContent = '-';
+                        cell.style.color = '#666';
+                    }
+                    
+                    row.appendChild(cell);
+                });
+                
+                timetableBody.appendChild(row);
+            });
+
+            // Set download link
+            if (data.excelFile) {
+                downloadBtn.href = `/api/download/${data.excelFile}`;
+            }
+        }
+    </script>
+</body>
+</html>
+
