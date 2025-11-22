@@ -17,7 +17,11 @@ Upload the required input files listed above, and you will get a course-timetabl
 
 ## futer steps ## 🚗
 Since now all the code is based on "Course scheduler FALL 2025 ver 6-checkpoint.ipynb" which was provided by prof.Kanagawa
+
 Future steps would be more detailed into iteration, optimization and improvement.
 We may add more functions like:
+
+
 1️⃣ Add a personal time-table scheduler. Based on the time table we have now, each student could access our website, and through dragging their specific courses from the big time table into their personalized small time table, they will get a private time table freely.
+
 2️⃣...
