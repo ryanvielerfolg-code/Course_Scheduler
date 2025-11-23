@@ -429,10 +429,30 @@
             submitBtn.disabled = true;
 
             try {
-                const response = await fetch('/api/schedule', {
+                // Use absolute URL to avoid routing issues
+                const apiUrl = window.location.origin + '/api/schedule';
+                
+                const response = await fetch(apiUrl, {
                     method: 'POST',
                     body: formData
                 });
+
+                // Check response status first
+                if (!response.ok) {
+                    // Try to get error message
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `Server error (${response.status}): ${response.statusText}`);
+                    } else {
+                        const text = await response.text();
+                        // Check if it's an HTML error page
+                        if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+                            throw new Error(`Server returned HTML instead of JSON. Status: ${response.status}. Please check if the server is running correctly.`);
+                        }
+                        throw new Error(`Server error (${response.status}): ${text.substring(0, 200)}`);
+                    }
+                }
 
                 // Check if response is JSON
                 const contentType = response.headers.get('content-type');
@@ -443,11 +463,7 @@
                 } else {
                     // If not JSON, read as text to see the error
                     const text = await response.text();
-                    throw new Error(`Server error: ${text.substring(0, 200)}`);
-                }
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to generate schedule');
+                    throw new Error(`Server returned non-JSON response: ${text.substring(0, 200)}`);
                 }
 
                 // Display results
@@ -455,7 +471,8 @@
                 resultsSection.classList.add('active');
                 
             } catch (error) {
-                errorMessage.textContent = error.message;
+                console.error('Error details:', error);
+                errorMessage.textContent = error.message || 'An unexpected error occurred. Please try again.';
                 errorMessage.classList.add('active');
             } finally {
                 loading.classList.remove('active');
