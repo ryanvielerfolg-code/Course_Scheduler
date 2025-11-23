@@ -558,7 +558,24 @@
 
             // Set download link
             if (data.excelFile) {
-                downloadBtn.href = `/api/download/${data.excelFile}`;
+                // Check if it's a base64 string (Vercel) or filename (local)
+                if (typeof data.excelFile === 'string' && data.excelFile.length > 100) {
+                    // It's base64 encoded, create download link
+                    const fileName = data.excelFileName || 'weekly_timetable.xlsx';
+                    const byteCharacters = atob(data.excelFile);
+                    const byteNumbers = new Array(byteCharacters.length);
+                    for (let i = 0; i < byteCharacters.length; i++) {
+                        byteNumbers[i] = byteCharacters.charCodeAt(i);
+                    }
+                    const byteArray = new Uint8Array(byteNumbers);
+                    const blob = new Blob([byteArray], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                    const url = URL.createObjectURL(blob);
+                    downloadBtn.href = url;
+                    downloadBtn.download = fileName;
+                } else {
+                    // It's a filename (local server)
+                    downloadBtn.href = `/api/download/${data.excelFile}`;
+                }
             }
         }
     </script>
