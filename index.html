@@ -434,7 +434,17 @@
                     body: formData
                 });
 
-                const data = await response.json();
+                // Check if response is JSON
+                const contentType = response.headers.get('content-type');
+                let data;
+                
+                if (contentType && contentType.includes('application/json')) {
+                    data = await response.json();
+                } else {
+                    // If not JSON, read as text to see the error
+                    const text = await response.text();
+                    throw new Error(`Server error: ${text.substring(0, 200)}`);
+                }
 
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to generate schedule');
