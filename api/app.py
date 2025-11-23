@@ -171,8 +171,12 @@ def download():
     # This endpoint is not needed, but kept for compatibility
     return jsonify({'error': 'Files are included in the schedule response as base64'}), 501
 
+# Root route for health check
+@app.route('/', methods=['GET'])
+def root():
+    return jsonify({'status': 'ok', 'message': 'Course Scheduler API'})
+
 # Export app for Vercel
-# Vercel will automatically detect and use this
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+# Vercel's Python runtime automatically detects Flask apps
+# The app object will be used as the WSGI application
 

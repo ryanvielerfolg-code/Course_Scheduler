@@ -12,8 +12,12 @@
       "dest": "/api/app.py"
     },
     {
-      "src": "/(.*)",
+      "src": "/",
       "dest": "/index.html"
+    },
+    {
+      "src": "/(.*\\.(html|css|js|png|jpg|jpeg|gif|ico|svg))",
+      "dest": "/$1"
     }
   ]
 }
