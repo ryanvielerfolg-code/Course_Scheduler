@@ -24,7 +24,9 @@ def internal_error(error):
 
 @app.errorhandler(404)
 def not_found(error):
-    return jsonify({'error': 'Resource not found'}), 404
+    # Log the requested path for debugging
+    print(f"404 Error - Requested path: {request.path}")
+    return jsonify({'error': f'Resource not found: {request.path}. Please check the URL.'}), 404
 
 @app.errorhandler(400)
 def bad_request(error):
@@ -37,6 +39,9 @@ def index():
 @app.route('/api/schedule', methods=['POST'])
 def schedule():
     try:
+        # Log request for debugging
+        print(f"Received schedule request from {request.remote_addr}")
+        
         # Check if files are present
         if 'groupwise_file' not in request.files or 'students_file' not in request.files:
             return jsonify({'error': 'Both files are required'}), 400
