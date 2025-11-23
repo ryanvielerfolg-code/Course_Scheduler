@@ -17,6 +17,19 @@ app.config['OUTPUT_FOLDER'] = 'outputs'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 
+# Error handlers to ensure JSON responses
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'error': 'Internal server error. Please check the server logs for details.'}), 500
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Resource not found'}), 404
+
+@app.errorhandler(400)
+def bad_request(error):
+    return jsonify({'error': 'Bad request'}), 400
+
 @app.route('/')
 def index():
     return send_file(os.path.join(os.path.dirname(__file__), 'index.html'))
@@ -106,17 +119,22 @@ with open(json_output, 'w') as f:
                 f.write(script_content)
             
             # Run the scheduler script
-            result = subprocess.run(
-                [sys.executable, scheduler_script],
-                cwd=temp_dir,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minute timeout
-            )
+            try:
+                result = subprocess.run(
+                    [sys.executable, scheduler_script],
+                    cwd=temp_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minute timeout
+                )
+            except subprocess.TimeoutExpired:
+                return jsonify({'error': 'Processing timeout. The schedule is too complex. Please try with smaller datasets.'}), 500
             
             if result.returncode != 0:
-                error_msg = result.stderr or result.stdout
-                return jsonify({'error': f'Scheduler error: {error_msg[:500]}'}), 500
+                error_msg = result.stderr or result.stdout or 'Unknown error occurred'
+                # Clean up error message
+                error_msg = error_msg.replace('\n', ' ').strip()[:500]
+                return jsonify({'error': f'Scheduler error: {error_msg}'}), 500
             
             # Read the JSON output
             json_path = os.path.join(temp_dir, 'output.json')
@@ -140,10 +158,12 @@ with open(json_output, 'w') as f:
             # Clean up temp directory
             shutil.rmtree(temp_dir, ignore_errors=True)
             
-    except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Processing timeout. The schedule is too complex.'}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        # Log the full error for debugging
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error in schedule endpoint: {error_trace}")
+        return jsonify({'error': f'An error occurred: {str(e)}'}), 500
 
 @app.route('/api/download/<filename>')
 def download(filename):
