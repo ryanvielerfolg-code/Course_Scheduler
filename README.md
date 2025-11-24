@@ -11,7 +11,7 @@ For now it's version 1.0, you need to upload two files:
 Those are the two "input" of the main function: ** Course_scheduler.py **
 
 The website was deployed through Vercel.com, which offers a free-deployment and domain.
-You can access the website through this domain: https://course-scheduler-henna.vercel.app/
+You can access the website through this domain: https://course-scheduler-8189.onrender.com
 
 Upload the required input files listed above, and you will get a course-timetable, also avaliable for you to download.
 
