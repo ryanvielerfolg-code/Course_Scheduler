@@ -15,7 +15,7 @@ You can access the website through this domain: https://course-scheduler-8189.on
 
 Upload the required input files listed above, and you will get a course-timetable, also avaliable for you to download.
 
-## futer steps ## 🚗
+## future steps ## 🚗
 Since now all the code is based on "Course scheduler FALL 2025 ver 6-checkpoint.ipynb" which was provided by prof.Kanagawa
 
 Future steps would be more detailed into iteration, optimization and improvement.
