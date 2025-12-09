@@ -24,7 +24,7 @@ room_df = pd.DataFrame({
 
 # === Define Time Slots ===
 time_slots = [
-    "Tue_AM", "Tue_PM", "Wed_AM", "Wed_PM", "Thu_AM", "Fri_AM", "Fri_PM"
+    "Mon_AM", "Mon_PM", "Tue_AM", "Tue_PM", "Wed_AM", "Wed_PM", "Thu_AM", "Fri_AM", "Fri_PM"
 ]
 
 # === Derive Course Demand and Type ===
@@ -501,7 +501,7 @@ if unassigned:
         print(f"{c}: {diagnostics.get(c, 'No info')}")
 
 # === Create Timetable DataFrame ===
-days = ["Tue", "Wed", "Thu", "Fri"]
+days = ["Mon", "Tue", "Wed", "Thu", "Fri"]
 slots = ["AM", "PM"]
 timetable = {slot: {day: "" for day in days} for slot in slots}
 
