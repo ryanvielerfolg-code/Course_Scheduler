@@ -1,672 +1,412 @@
-# Course Scheduler for Fall 2025 with Enhanced Logic and Diagnostics
+# Course Scheduler for Fall 2025 — Final Optimized Greedy Algorithm
+# Fixes: Room Occupancy, Load Balancing (Spread), JSON Serialization, L/S Logic
+
+import math
 import pandas as pd
 import numpy as np
 from collections import defaultdict
-from openpyxl import load_workbook
+from openpyxl.styles import Alignment
+import os
 
-# === Load Groupwise Course Info ===
-groupwise_df = pd.read_excel("groupwise_course_tags_fall2025.xlsx")
-groupwise_df = groupwise_df.dropna(subset=["Course", "Track", "Semester"])
+# === 1. Setup & Configuration ===
 
-# Normalize text
-groupwise_df["Course"] = groupwise_df["Course"].str.strip()
-groupwise_df["Track"] = groupwise_df["Track"].str.strip()
-groupwise_df["Semester"] = groupwise_df["Semester"].str.strip()
-groupwise_df["Group"] = groupwise_df["Track"] + "_" + groupwise_df["Semester"]
-
-# === Define Rooms ===
+# Define Rooms and Capacities
 room_df = pd.DataFrame({
-    "Room": [
-        "Amphitheater", "101", "102", "151", "152", "153", "154", "155", "10", "12"
-    ],
+    "Room": ["Amphitheater", "101", "102", "151", "152", "153", "154", "155", "10", "12"],
     "Capacity": [201, 95, 49, 90, 48, 48, 16, 16, 18, 15]
 })
 
-# === Define Time Slots ===
+# Define Time Slots (Mon-Fri, AM/PM)
 time_slots = [
-    "Mon_AM", "Mon_PM", "Tue_AM", "Tue_PM", "Wed_AM", "Wed_PM", "Thu_AM", "Fri_AM", "Fri_PM"
+    "Mon_AM", "Mon_PM",
+    "Tue_AM", "Tue_PM",
+    "Wed_AM", "Wed_PM",
+    "Thu_AM", "Thu_PM",
+    "Fri_AM", "Fri_PM",
 ]
 
-# === Derive Course Demand and Type ===
+# === 2. Data Loading & Cleaning Functions ===
+
+def load_groupwise(path: str) -> pd.DataFrame:
+    """Load course metadata (Track, Type, Mandatory/Regular)."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Input file not found: {path}")
+        
+    df = pd.read_excel(path)
+    # Filter and clean
+    cols = ["Course", "Track", "GroupTag", "Type"]
+    # Ensure columns exist
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        # Fallback for simple template matching if strict columns missing
+        pass 
+        
+    df = df.dropna(subset=cols)
+    df["Course"] = df["Course"].astype(str).str.strip()
+    df["Track"] = df["Track"].astype(str).str.strip()
+    df["GroupTag"] = df["GroupTag"].astype(str).str.strip().str.lower()
+    df["Type"] = df["Type"].astype(str).str.strip().str.upper()
+    
+    # Normalize values
+    df.loc[~df["GroupTag"].isin(["mandatory", "regular"]), "GroupTag"] = "regular"
+    df.loc[~df["Type"].isin(["L", "S"]), "Type"] = "S" # Default to Short if unknown
+    return df
+
+def load_students(path: str) -> pd.DataFrame:
+    """Load student counts."""
+    if not os.path.exists(path):
+        print(f"⚠️ Warning: {path} not found. Using dummy data.")
+        return pd.DataFrame(columns=["Course", "Students_2024"])
+        
+    df = pd.read_csv(path)
+    
+    # Basic cleaning to find the right columns
+    course_col = next((c for c in df.columns if "course" in c.lower()), df.columns[0])
+    student_col = next((c for c in df.columns if "student" in c.lower()), df.columns[1])
+    
+    df = df[[course_col, student_col]].copy()
+    df.columns = ["Course", "Students_2024"]
+    
+    df["Course"] = df["Course"].astype(str).str.strip()
+    df["Students_2024"] = pd.to_numeric(df["Students_2024"], errors="coerce").fillna(0).astype(int)
+    return df
+
+# === 3. Pre-processing ===
+
+print("--- Loading Data ---")
+try:
+    groupwise_df = load_groupwise("groupwise_course_tags_fall2025.xlsx")
+    students_df = load_students("number-of-students-fall-2024-extracted.csv")
+except Exception as e:
+    print(f"Error loading files: {e}")
+    # Initialize empty defaults to prevent crash
+    course_info = pd.DataFrame()
+    exit(1)
+
+# Aggregating Course Info
+def get_primary_value(series):
+    return series.mode()[0] if not series.mode().empty else series.iloc[0]
+
 course_info = groupwise_df.groupby("Course").agg(
-    MandatoryGroups=("GroupTag", lambda x: sum(x == "mandatory")),
-    TotalGroups=("Group", "nunique"),
-    Type=("Type", "first")
+    Track=("Track", get_primary_value),
+    Type=("Type", get_primary_value),
+    IsMandatory=("GroupTag", lambda s: (s == "mandatory").any())
 ).reset_index()
 
-# Sort by priority (mandatory groups first)
-course_info = course_info.sort_values(by=["MandatoryGroups", "TotalGroups"], ascending=False)
+# Merge Student Counts
+course_info = course_info.merge(students_df, on="Course", how="left")
+course_info["Students_2024"] = course_info["Students_2024"].fillna(0).astype(int)
 
-# === Load Student Estimates from 2024 and Merge ===
-student_counts_2024 = pd.read_csv("number-of-students-fall-2024-extracted.csv")
-student_counts_2024.columns = ["Course", "EstimatedStudents"]
+# === GREEDY STRATEGY: SORTING ===
+# Priority: Mandatory -> High Enrollment -> Long Duration
+course_info = course_info.sort_values(
+    by=["IsMandatory", "Students_2024", "Type"],
+    ascending=[False, False, True] 
+).reset_index(drop=True)
 
-# Merge with current course_info
-course_info = course_info.merge(student_counts_2024, on="Course", how="left")
-course_info["EstimatedStudents"] = course_info["EstimatedStudents"].fillna(0).astype(int)
+print(f"Loaded {len(course_info)} unique courses to schedule.")
 
- 
-# Sort by: EstimatedStudents first, then MandatoryGroups, then TotalGroups
-course_info = course_info.sort_values(by=["EstimatedStudents", "MandatoryGroups", "TotalGroups"], ascending=[False, False, False])
+# === 4. Scheduler State Initialization ===
 
-def is_conflicting(existing_half, new_half):
-    return (
-        existing_half == new_half
-        or "Long" in (existing_half, new_half)
-    )
-
-# === Assignment Structures ===
 assignments = []
-room_occupancy = {
-    slot: {"H1": set(), "H2": set()} for slot in time_slots
-}
-group_occupancy = defaultdict(set)
-day_load = defaultdict(int)
-half_load = {slot: {"H1": 0, "H2": 0} for slot in time_slots}
 unassigned = []
-diagnostics = {}
-evicted_courses = []
-conflict_log = defaultdict(list)  # slot → list of (course, room, half, conflicting_groups)
+
+# Slot Load (for soft balancing)
+slot_load = {slot: 0 for slot in time_slots}
+
+# Track Constraints: Track -> Set of (Slot, Half)
+track_mandatory_usage = defaultdict(set) 
+
+# Room Occupancy: (Slot, Room) -> Set of Halves {'H1', 'H2'}
+room_occupancy = defaultdict(set)
+
+def is_room_free(slot, room, required_halves):
+    """Check if the room is free for the required halves in the given slot."""
+    occupied_halves = room_occupancy.get((slot, room), set())
+    if not required_halves.isdisjoint(occupied_halves):
+        return False
+    return True
+
+def book_room(slot, room, halves):
+    """Mark room as occupied."""
+    current = room_occupancy[(slot, room)]
+    room_occupancy[(slot, room)] = current.union(halves)
+
+def check_track_conflict(track, slot, halves):
+    """Check if this track already has a mandatory class in this slot/half."""
+    used_halves = track_mandatory_usage.get((track, slot), set())
+    if not halves.isdisjoint(used_halves):
+        return True 
+    return False
+
+def record_track_usage(track, slot, halves):
+    current = track_mandatory_usage[(track, slot)]
+    track_mandatory_usage[(track, slot)] = current.union(halves)
 
 
+# === 5. Main Greedy Loop ===
 
+print("\n--- Starting Greedy Schedule ---")
 
-def assign_course(course, ctype, groups, priority=True, can_preempt=False, ignore_conflicts=False):
-    est_students = course_info.loc[course_info.Course == course, 'EstimatedStudents'].values[0]
-    mandatory_groups = groupwise_df[(groupwise_df["Course"] == course) & (groupwise_df["GroupTag"] == "mandatory")]["Group"].unique()
-    
-    #regular_groups = [g for g in groups if g not in mandatory_groups]
-    # Consider all groups (including mandatory) for soft conflict detection
-    conflict_groups_for_penalty = groups
+for _, row in course_info.iterrows():
+    course = row["Course"]
+    track = row["Track"]
+    is_mandatory = row["IsMandatory"]
+    students = row["Students_2024"]
+    ctype = row["Type"] 
 
-    preferred_slots = sorted(time_slots, key=lambda s: day_load[s.split("_")[0]])
-    conflict_trace = []
-    
-    alpha = 3.0  # weight for soft conflict
-    beta = 1.0   # weight for imbalance
+    # Prepare required halves
+    if ctype == 'L':
+        possible_half_configs = [{'H1', 'H2'}]
+    else:
+        # Prefer H1, but allow H2
+        possible_half_configs = [{'H1'}, {'H2'}]
+
     best_choice = None
-    best_penalty = float('inf')
+    best_score = float('inf')
 
-    for slot in preferred_slots:
-        for half in (["Long"] if ctype == "L" else ["H1", "H2"]):
-            for _, r in room_df.sort_values(by='Capacity', ascending=False).iterrows():
-                room = r.Room
-
-                # Check if room is occupied
-                occupied = (room in room_occupancy[slot]["H1"]) or (room in room_occupancy[slot]["H2"])
-                if ctype != "L" and room not in room_occupancy[slot][half]:
-                    occupied = False
-                if occupied:
-                    continue
-
-                # Check hard conflicts for mandatory groups
-                #conflicting_mandatory = [g for g in mandatory_groups if slot in group_occupancy[g]]
-                #real_conflict = [g for g in conflicting_mandatory if not any(kw in g.upper() for kw in ["TU", "À", "5"])]
-
-                conflicting_mandatory = [
-                    g for g in mandatory_groups
-                    if any(
-                        is_conflicting(existing_half, half)
-                        for (s, existing_half) in group_occupancy[g]
-                        if s == slot
-                    )
-                ]
-                real_conflict = [g for g in conflicting_mandatory if not any(kw in g.upper() for kw in ["TU", "À", "5"])]
-
-                # Extra check: avoid conflicts between mandatory courses
-                if not ignore_conflicts:
-                    conflict_with_other_mandatory = False
-                    for a in assignments:
-                        if a["TimeSlot"] == slot and is_conflicting(a["Half"], half):
-                            other_course = a["Course"]
-                            other_mandatory = groupwise_df[
-                                (groupwise_df["Course"] == other_course) &
-                                (groupwise_df["GroupTag"] == "mandatory")
-                            ]["Group"].unique()
-
-                            shared_mandatory = set(mandatory_groups).intersection(set(other_mandatory))
-                            if shared_mandatory:
-                                conflict_trace.append((slot, room, half, list(shared_mandatory)))
-                                conflict_with_other_mandatory = True
-                                break  # no need to check further
-
-                    if conflict_with_other_mandatory:
-                        continue  # skip this slot due to hard mandatory conflict
-                                
+    # Iterate all Time Slots
+    for slot in time_slots:
+        
+        # Iterate all Half Configurations
+        for required_halves in possible_half_configs:
             
-                if real_conflict and not ignore_conflicts:
-                    conflict_trace.append((slot, room, half, real_conflict))
-                    conflict_log[slot].append({
-                        "Course": course,
-                        "Room": room,
-                        "Half": half,
-                        "ConflictsWithGroups": real_conflict
-                    })
+            # --- Hard Constraint 1: Mandatory Track Conflict ---
+            if is_mandatory:
+                if check_track_conflict(track, slot, required_halves):
+                    continue 
 
-                    if can_preempt:
-                        for i, a in enumerate(assignments):
-                            if a["TimeSlot"] == slot and a["Room"] == room and a["Half"] == half:
-                                target_course = a["Course"]
-                                target_mandatory = course_info.loc[course_info.Course == target_course, "MandatoryGroups"].values[0]
-                                # Only evict if current course has more mandatory groups
-                                if len(mandatory_groups) > target_mandatory:
-                                    # Remove assignment and clear occupancy
-                                    assignments.pop(i)
-                                    room_occupancy[slot]["H1"].discard(room)
-                                    room_occupancy[slot]["H2"].discard(room)
-                                    group_tags = groupwise_df[groupwise_df["Course"] == target_course]["Group"].unique()
-                                    for g in group_tags:
-                                        group_occupancy[g].discard(slot)
-
-                                    # Add for later reassignment
-                                    target_type = course_info.loc[course_info.Course == target_course, "Type"].values[0]
-                                    evicted_courses.append({
-                                        "Course": target_course,
-                                        "Type": target_type,
-                                        "Groups": group_tags
-                                    })
-
-                                    print(f"🔥 Evicted {target_course} to make room for {course}")
-                                    return assign_course(course, ctype, groups, priority, can_preempt=False)
-
-                    continue  # skip this slot               
+            # --- Hard Constraint 2 & Soft Constraint (Best Fit) ---
+            # Filter rooms by capacity
+            valid_rooms = room_df[room_df["Capacity"] >= students].copy()
+            # Sort valid rooms by Capacity ASCENDING (Best Fit Strategy)
+            valid_rooms = valid_rooms.sort_values(by="Capacity", ascending=True)
+            
+            selected_room = None
+            selected_capacity = 0
+            
+            # Find first available room
+            for _, r_data in valid_rooms.iterrows():
+                r_name = r_data["Room"]
+                r_cap = r_data["Capacity"]
                 
-
-
-                # Total number of groups this course is intended for
-                total_course_groups = len(groups) if len(groups) > 0 else 1  # avoid division by 0
-
+                if is_room_free(slot, r_name, required_halves):
+                    selected_room = r_name
+                    selected_capacity = r_cap
+                    break 
+            
+            if not selected_room:
+                continue 
+            
+            # --- Soft Constraints Calculation (Scoring) ---
+            
+            # 1. Load Balance (SPREAD): 
+            # Use simple load count. Less load = Better score.
+            load_penalty = slot_load[slot]
+            
+            # 2. Track Overlap (Regular)
+            overlap_penalty = 0
+            if not is_mandatory:
+                for a in assignments:
+                    if a["TimeSlot"] == slot and a["Track"] == track:
+                        if not required_halves.isdisjoint(a["Halves"]):
+                            overlap_penalty = 1
+                            break
+            
+            # 3. Room Slack (Waste)
+            slack_penalty = (selected_capacity - students) / 10.0 
+            
+            # Total Score (Weighted)
+            # High weight on overlap to prevent it
+            # Moderate weight on load to force spreading across week
+            total_score = (load_penalty * 10) + (overlap_penalty * 100) + slack_penalty
+            
+            if total_score < best_score:
+                best_score = total_score
+                half_str = "Long" if ctype == 'L' else list(required_halves)[0]
                 
-                conflicting_groups = [
-                    g for g in conflict_groups_for_penalty
-                    if any(
-                        is_conflicting(existing_half, half)
-                        for (s, existing_half) in group_occupancy.get(g, set())
-                        if s == slot
-                    )
-                ]
+                best_choice = {
+                    "Course": course,
+                    "TimeSlot": slot,
+                    "Room": selected_room,
+                    "Half": half_str,
+                    "Halves": required_halves,
+                    "Track": track,
+                    "IsMandatory": is_mandatory,
+                    "Students": students,
+                    "Capacity": selected_capacity,
+                    "Score": best_score
+                }
 
-                conflict_score = len(conflicting_groups) / total_course_groups
-
-
-                # penalty for day imbalance
-                tentative_day_load = day_load.copy()
-                tentative_day_load[slot.split("_")[0]] += 1
-                slot_std = np.std(list(tentative_day_load.values()))
-
-                # penalty for half-slot imbalance (only relevant for short courses)
-                h_load_std = 0.0
-                if ctype != "L":
-                    tentative_half_load = half_load[slot].copy()
-                    tentative_half_load[half] += 1
-                    h_load_std = np.std(list(tentative_half_load.values()))
-
-                # final penalty
-                total_penalty = alpha * conflict_score + beta * slot_std + 0.3 * h_load_std
-
-
-                if total_penalty < best_penalty:
-                    best_choice = (slot, room, half, conflict_score)
-                    best_penalty = total_penalty
-
+    # Assign the best found slot
     if best_choice:
-        slot, room, half, conflict_score = best_choice
-        if ctype == "L":
-            room_occupancy[slot]["H1"].add(room)
-            room_occupancy[slot]["H2"].add(room)
-        else:
-            room_occupancy[slot][half].add(room)
-
-        for g in groups:
-            # Always add the actual half
-            group_occupancy[g].add((slot, half))
-
-            # Ensure Long implies H1 and H2 occupancy (for conflict detection)
-            if half == "Long":
-                group_occupancy[g].add((slot, "H1"))
-                group_occupancy[g].add((slot, "H2"))
-            elif half in {"H1", "H2"}:
-                group_occupancy[g].add((slot, "Long"))
-
-        assignments.append({
+        assignments.append(best_choice)
+        slot_load[best_choice["TimeSlot"]] += 1
+        book_room(best_choice["TimeSlot"], best_choice["Room"], best_choice["Halves"])
+        if is_mandatory:
+            record_track_usage(track, best_choice["TimeSlot"], best_choice["Halves"])
+    else:
+        unassigned.append({
             "Course": course,
-            "TimeSlot": slot,
-            "Room": room,
-            "Half": half,
-            "SoftConflict": conflict_score > 0
+            "Reason": "No valid room/slot found"
         })
 
-        day_load[slot.split("_")[0]] += 1
-        if ctype != "L":
-            half_load[slot][half] += 1
+# === 6. Output & Diagnostics ===
 
-        return True
-
-    diagnostics[course] = "Blocked by mandatory group conflict in all slots:\n" + "\n".join(
-        f"  {slot} @ {room} ({half}): " + ", ".join(conflict_groups)
-        for slot, room, half, conflict_groups in conflict_trace
-    )
-    return False
-
-# === Assign Courses ===
-for _, row in course_info.iterrows():
-    course = row.Course
-    ctype = row.Type
-    groups = groupwise_df[groupwise_df.Course == course].Group.unique()
-    is_mandatory = row.MandatoryGroups > 0
-
-    success = assign_course(course, ctype, groups, priority=True)
-
-    if not success and not is_mandatory:
-        success = assign_course(course, ctype, groups, priority=False)
-
-    if not success and is_mandatory:
-        success = assign_course(course, ctype, groups, priority=True, can_preempt=True)
-
-    # 🆕 Force even hard conflicts if all else fails
-    if not success and is_mandatory:
-        success = assign_course(course, ctype, groups, priority=False, can_preempt=False, ignore_conflicts=True)
-        if success:
-            print(f"🚨 Forcibly assigned {course} despite hard mandatory group conflicts.")
-
-    if not success and course not in unassigned:
-        unassigned.append(course)
-
-
-
-# === Second pass: try to reassign evicted courses ===
-print("\n=== Reassignment Pass for Evicted Courses ===")
-for e in evicted_courses:
-    course = e["Course"]
-    ctype = e["Type"]
-    groups = e["Groups"]
-
-    reassigned = (
-        assign_course(course, ctype, groups, priority=True) or
-        assign_course(course, ctype, groups, priority=False) or
-        assign_course(course, ctype, groups, priority=True, can_preempt=True) or
-        assign_course(course, ctype, groups, priority=False, ignore_conflicts=True)
-    )
-
-    if not reassigned:
-        print(f"⚠️ Could not reassign evicted course: {course}")
-        unassigned.append(course)
-
-
-# === Second Pass: Try to Reduce Soft Conflicts ===
-print("\n=== 🛠️ Soft Conflict Reassignment Pass ===")
-
-# Store current assignments for rollback
-course_to_assignment = {
-    a["Course"]: a.copy() for a in assignments
-    if a["SoftConflict"]
-}
-
-conflicted_courses = list(course_to_assignment.keys())
-print(f"🔍 Found {len(conflicted_courses)} course(s) with soft conflicts to review.")
-        
-        
-
-        
-        
-# Remove conflicted courses from current assignments and occupancy
-for course in conflicted_courses:
-    prev = course_to_assignment[course]
-    slot = prev["TimeSlot"]
-    room = prev["Room"]
-    half = prev["Half"]
-    ctype = course_info.loc[course_info.Course == course, "Type"].values[0]
-    groups = groupwise_df[groupwise_df.Course == course]["Group"].unique()
-
-    # Remove from assignments
-    assignments = [a for a in assignments if a["Course"] != course]
-
-    # Free room
-    if half == "Long":
-        room_occupancy[slot]["H1"].discard(room)
-        room_occupancy[slot]["H2"].discard(room)
-    else:
-        room_occupancy[slot][half].discard(room)
-
-    # Free groups
-    for g in groups:
-        group_occupancy[g].discard((slot, half))
-        if half == "Long":
-            group_occupancy[g].discard((slot, "H1"))
-            group_occupancy[g].discard((slot, "H2"))
-        elif half in {"H1", "H2"}:
-            group_occupancy[g].discard((slot, "Long"))
-
-    # Adjust load
-    day_load[slot.split("_")[0]] -= 1
-    if ctype != "L":
-        half_load[slot][half] -= 1
-        
-        
-print("\n=== 🔁 Second Pass Reassignment for Soft-Conflict Courses ===")
-
-for course in conflicted_courses:
-    row = course_info[course_info.Course == course].iloc[0]
-    ctype = row.Type
-    groups = groupwise_df[groupwise_df.Course == course].Group.unique()
-    is_mandatory = row.MandatoryGroups > 0
-    prev_assignment = course_to_assignment[course]
-    
-    # Temporarily store assignments for rollback
-    backup_assignments = assignments.copy()
-    backup_room_occupancy = {slot: {h: set(v) for h, v in halves.items()} for slot, halves in room_occupancy.items()}
-    backup_group_occupancy = defaultdict(set, {k: set(v) for k, v in group_occupancy.items()})
-    
-    # Try normal reassignment
-    success = assign_course(course, ctype, groups, priority=False)
-    
-    # Try forced reassignment with can_preempt
-    if not success and is_mandatory:
-        success = assign_course(course, ctype, groups, priority=False, can_preempt=True)
-
-    # Last resort: ignore even hard conflicts
-    if not success:
-        success = assign_course(course, ctype, groups, priority=False, ignore_conflicts=True)
-
-    # === Validation: Keep only if it reduced soft conflict ===
-    new_row = next((a for a in assignments if a["Course"] == course), None)
-    if new_row:
-        slot = new_row["TimeSlot"]
-        half = new_row["Half"]
-        my_groups = set(groups)
-
-        conflict_found = False
-        for other in assignments:
-            if other["Course"] == course or other["TimeSlot"] != slot:
-                continue
-            if not is_conflicting(half, other["Half"]):
-                continue
-            other_groups = set(groupwise_df[groupwise_df["Course"] == other["Course"]]["Group"])
-            if my_groups & other_groups:
-                conflict_found = True
-                break
-
-        if conflict_found:
-            # Roll back
-            assignments = backup_assignments
-            room_occupancy = backup_room_occupancy
-            group_occupancy = backup_group_occupancy
-            assignments.append(prev_assignment)
-     
-        
-        
-        
-print("\n=== 🚨 Hard Conflicts Between Mandatory Courses ===")
-
-from itertools import combinations
-
-# Filter mandatory course assignments
-mandatory_assignments = [
-    a for a in assignments
-    if course_info.loc[course_info.Course == a["Course"], "MandatoryGroups"].values[0] > 0
-]
-
-# Track reported conflicts to avoid duplicates
-reported_pairs = set()
-conflict_report = []
-
-def same_or_overlapping_half(h1, h2):
-    return h1 == h2 or "Long" in (h1, h2)
-
-for a1, a2 in combinations(mandatory_assignments, 2):
-    if a1["TimeSlot"] != a2["TimeSlot"]:
-        continue
-    if not same_or_overlapping_half(a1["Half"], a2["Half"]):
-        continue
-
-    g1 = set(groupwise_df[(groupwise_df["Course"] == a1["Course"]) &
-                          (groupwise_df["GroupTag"] == "mandatory")]["Group"])
-    g2 = set(groupwise_df[(groupwise_df["Course"] == a2["Course"]) &
-                          (groupwise_df["GroupTag"] == "mandatory")]["Group"])
-    shared = g1 & g2
-    if shared:
-        pair = tuple(sorted((a1["Course"], a2["Course"])))
-        if pair not in reported_pairs:
-            reported_pairs.add(pair)
-            conflict_report.append({
-                "Slot": a1["TimeSlot"],
-                "RoomA": a1["Room"],
-                "HalfA": a1["Half"],
-                "RoomB": a2["Room"],
-                "HalfB": a2["Half"],
-                "CourseA": a1["Course"],
-                "CourseB": a2["Course"],
-                "Groups": sorted(shared)
-            })
-
-# Print results
-if not conflict_report:
-    print("✅ No conflicts between mandatory courses.")
-else:
-    for c in conflict_report:
-        print(f"\n🕒 {c['Slot']}:")
-        print(f"  🔻 {c['CourseA']} ({c['RoomA']}, {c['HalfA']}) ⟷ {c['CourseB']} ({c['RoomB']}, {c['HalfB']})")
-        print(f"     • Shared mandatory group(s): {', '.join(c['Groups'])}")
-        
-    
-
-# === Create Assignment DataFrame ===
-assignments_df = pd.DataFrame(assignments)
-assignments_df = assignments_df.merge(course_info, on="Course", how="left")
-assignments_df = assignments_df.sort_values(by=["TimeSlot", "Half", "Room"])
-print("\n=== Final Course Assignments ===")
-print(assignments_df[["Course", "TimeSlot", "Room", "Half", "MandatoryGroups", "SoftConflict"]].to_string(index=False))
-
-def is_conflicting(h1, h2):
-    return h1 == h2 or "Long" in (h1, h2)
-
-# Build group mapping
-group_map = groupwise_df.groupby("Course")["Group"].apply(set).to_dict()
-
-# Recalculate true soft conflicts
-def has_soft_conflict(row, all_assignments):
-    course = row["Course"]
-    slot = row["TimeSlot"]
-    half = row["Half"]
-    groups = group_map.get(course, set())
-    
-    for _, other in all_assignments.iterrows():
-        if other["Course"] == course:
-            continue
-        if other["TimeSlot"] != slot:
-            continue
-        if not is_conflicting(half, other["Half"]):
-            continue
-        
-        other_groups = group_map.get(other["Course"], set())
-        if groups & other_groups:
-            return True
-    return False
-
-# === Clear old SoftConflict values before recomputing ===
-assignments_df["SoftConflict"] = False
-
-
-# Update the column
-assignments_df["SoftConflict"] = assignments_df.apply(
-    lambda row: has_soft_conflict(row, assignments_df),
-    axis=1
-)
-
-
-# === Output diagnostics to screen ===
+print("\n--- Scheduling Complete ---")
 if unassigned:
-    print("\n--- Unassigned Courses ---")
-    for c in unassigned:
-        print(f"{c}: {diagnostics.get(c, 'No info')}")
+    print(f"⚠️ Warning: {len(unassigned)} courses could not be scheduled:")
+else:
+    print("✅ All courses successfully scheduled!")
 
-# === Create Timetable DataFrame ===
+# Initialize variables
 days = ["Mon", "Tue", "Wed", "Thu", "Fri"]
 slots = ["AM", "PM"]
-timetable = {slot: {day: "" for day in days} for slot in slots}
+timetable = {s: {d: "" for d in days} for s in slots}
 
-for _, row in assignments_df.iterrows():
-    day, slot = row.TimeSlot.split("_")
+# Build DataFrame
+if not assignments:
+    assignments_df = pd.DataFrame(columns=["Course", "TimeSlot", "Room", "Half", "Track", "IsMandatory", "Students", "Capacity", "SoftConflict"])
+else:
+    assignments_df = pd.DataFrame(assignments)
+
+if not assignments_df.empty:
+    # Recalculate Soft Conflicts
+    def check_soft_conflict(row):
+        if row["IsMandatory"]: return False
+        current_halves = row["Halves"]
+        others = assignments_df[
+            (assignments_df["TimeSlot"] == row["TimeSlot"]) & 
+            (assignments_df["Track"] == row["Track"]) & 
+            (assignments_df["Course"] != row["Course"])
+        ]
+        for _, o in others.iterrows():
+            if not current_halves.isdisjoint(o["Halves"]):
+                return True
+        return False
+
+    assignments_df["SoftConflict"] = assignments_df.apply(check_soft_conflict, axis=1)
     
-    # Append H1/H2/Long clearly to the course label
-    cell = f"{row.Course} ({row.Room}, {row.Half})"
-    if row.SoftConflict:
-        cell += " *"
+    # Data Cleaning for JSON/Web
+    safe_cols = ["Course", "TimeSlot", "Room", "Half", "Track", "IsMandatory", "Students", "Capacity", "SoftConflict"]
+    assignments_df = assignments_df[safe_cols].copy()
     
-    timetable[slot][day] += cell + "\n"
+    assignments_df["Students"] = assignments_df["Students"].astype(int)
+    assignments_df["Capacity"] = assignments_df["Capacity"].astype(int)
+    assignments_df["SoftConflict"] = assignments_df["SoftConflict"].astype(bool)
+    assignments_df["IsMandatory"] = assignments_df["IsMandatory"].astype(bool)
+    
+    assignments_df = assignments_df.sort_values(by=["TimeSlot", "Room"])
+    
+    print("\nTop 10 Assignments:")
+    print(assignments_df.head(10).to_string(index=False))
+    
+    # Fill Master Timetable Dictionary
+    for _, row in assignments_df.iterrows():
+        day, period = row["TimeSlot"].split("_")
+        entry = f"{row['Course']} ({row['Room']}, {row['Half']})"
+        if row["SoftConflict"]:
+            entry += " *"
+        current = timetable[period][day]
+        timetable[period][day] = (current + "\n" + entry) if current else entry
+            
+    # === NEW: Save Excel with Formatting (Spacing & Alignment) ===
+    output_filename = "weekly_timetable_fall2025.xlsx"
+    
+    # 定义一个格式化函数，专门用来把表格变“漂亮”
+    def format_worksheet(worksheet):
+        # 1. 设置列宽 (设为 30，足够宽以容纳课程信息)
+        for col in ['A', 'B', 'C', 'D', 'E', 'F']:
+            worksheet.column_dimensions[col].width = 35
 
-# === Create DataFrame and Save as Excel ===
-timetable_df = pd.DataFrame.from_dict(timetable, orient="index")[days]
-timetable_df.index.name = "TimeSlot"
-timetable_df.to_excel("weekly_timetable_fall2025.xlsx")
-
-
-# === Evaluation Metrics ===
-print("\n=== Diagnostic Metrics ===")
-
-# Total unassigned
-print(f"🧩 Unassigned courses: {len(unassigned)}")
-
-# Total soft conflicts
-total_soft_conflicts = assignments_df["SoftConflict"].sum()
-print(f"🔥 Soft conflicts: {total_soft_conflicts}")
-
-# Merge room capacities for room usage analysis
-room_capacity_map = room_df.set_index("Room")["Capacity"].to_dict()
-assignments_df["RoomCapacity"] = assignments_df["Room"].map(room_capacity_map)
-assignments_df["OverloadPenalty"] = (assignments_df["EstimatedStudents"] - assignments_df["RoomCapacity"]).clip(lower=0)
-assignments_df["UnderusePenalty"] = (assignments_df["RoomCapacity"] - assignments_df["EstimatedStudents"]).clip(lower=0)
-
-# Overload penalty
-print(f"📈 Total overload penalty (students exceeding room capacity): {assignments_df['OverloadPenalty'].sum()}")
-
-# Underuse (optional)
-print(f"📉 Total room underuse (unused capacity): {assignments_df['UnderusePenalty'].sum()}")
-
-# Room utilization efficiency
-used_rooms = assignments_df.shape[0]
-avg_fill_ratio = (assignments_df["EstimatedStudents"] / assignments_df["RoomCapacity"]).mean()
-print(f"🏛️ Average room fill ratio: {avg_fill_ratio:.2f} (based on estimated students)")
-
-# Load distribution across days and halves
-day_slot_counts = assignments_df.groupby("TimeSlot").size()
-print("\n📅 Time slot utilization:")
-for slot in time_slots:
-    count = day_slot_counts.get(slot, 0)
-    print(f"  {slot}: {count} course(s)")
-
-half_counts = assignments_df.groupby(["TimeSlot", "Half"]).size().unstack(fill_value=0)
-print("\n🌓 Half-slot usage per time slot:")
-print(half_counts)
-
-
-print(f"\n📦 Evicted courses attempted to reassign: {len(evicted_courses)}")
-print(f"📉 Remaining unassigned courses: {len(unassigned)}")
-
-import colorama
-from colorama import Fore, Style
-colorama.init(autoreset=True)
-
-print(f"\n{Style.BRIGHT}=== Final Soft Conflict Diagnostics (by slot) ==={Style.RESET_ALL}")
-
-from collections import defaultdict
-
-conflict_by_slot = defaultdict(list)
-slot_half_map = defaultdict(list)
-
-# Build slot → course map by half
-for _, row in assignments_df.iterrows():
-    slot_half_map[(row["TimeSlot"], row["Half"])].append(row["Course"])
-    if row["Half"] != "Long":
-        slot_half_map[(row["TimeSlot"], "Long")].append(row["Course"])
-    if row["Half"] == "Long":
-        slot_half_map[(row["TimeSlot"], "H1")].append(row["Course"])
-        slot_half_map[(row["TimeSlot"], "H2")].append(row["Course"])
-
-# Build mappings
-course_to_groups = {
-    c: set(groupwise_df[groupwise_df["Course"] == c]["Group"])
-    for c in assignments_df["Course"]
-}
-course_to_mandatory = {
-    c: set(groupwise_df[(groupwise_df["Course"] == c) & 
-                        (groupwise_df["GroupTag"] == "mandatory")]["Group"])
-    for c in assignments_df["Course"]
-}
-
-# Build conflicts
-for _, row in assignments_df[assignments_df["SoftConflict"]].iterrows():
-    course = row["Course"]
-    slot = row["TimeSlot"]
-    half = row["Half"]
-    room = row["Room"]
-
-    my_groups = course_to_groups.get(course, set())
-    my_mandatory = course_to_mandatory.get(course, set())
-    regular_groups = my_groups - my_mandatory
-
-    # Conflicting courses in same slot+half (considering Long)
-    others = set(slot_half_map[(slot, half)])
-    if half != "Long":
-        others |= set(slot_half_map[(slot, "Long")])
-    else:
-        others |= set(slot_half_map[(slot, "H1")]) | set(slot_half_map[(slot, "H2")])
-    others.discard(course)
-
-    details = []
-    for other in sorted(others):
-        other_groups = course_to_groups.get(other, set())
-        other_mandatory = course_to_mandatory.get(other, set())
-
-        for g in sorted(regular_groups & other_groups):
-            is_mandatory = g in other_mandatory
-            detail = f"  {Fore.CYAN}• Group {g}{Style.RESET_ALL} shared with {Fore.YELLOW}{other}{Style.RESET_ALL}"
-            if is_mandatory:
-                detail += f" {Fore.RED}🚨 (mandatory){Style.RESET_ALL}"
-            details.append(detail)
-
-    if details:
-        header = f"{Fore.RED}🔻 {Style.BRIGHT}{course}{Style.RESET_ALL} @ {slot} in Room {room} ({half})"
-        conflict_by_slot[slot].append((header, details))
-
-# Display by slot
-for slot in time_slots:
-    if conflict_by_slot[slot]:
-        print(f"\n🕒 {Style.BRIGHT}{slot}{Style.RESET_ALL}:")
-        for header, details in conflict_by_slot[slot]:
-            print(f"  {header}")
-            for d in details:
-                print(f"   {d}")
+        # 2. 遍历每一行，设置自动换行、居中和动态行高
+        for row in worksheet.iter_rows():
+            max_lines = 1
+            for cell in row:
+                # 设置对齐方式：自动换行，水平居中，垂直居中
+                cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
                 
-                
+                # 计算这个格子里有多少行文字（根据换行符 \n）
+                if cell.value and isinstance(cell.value, str):
+                    lines = str(cell.value).count('\n') + 1
+                    if lines > max_lines:
+                        max_lines = lines
+            
+            # 3. 设置行高
+            # 这里的逻辑是：每一行文字给 25 的高度，基础再加 10 的边距
+            # 这样即使只有一行字，也不会贴着边框
+            current_row_idx = row[0].row
+            if current_row_idx == 1:
+                # 表头稍微高一点
+                worksheet.row_dimensions[current_row_idx].height = 40
+            else:
+                # 内容行高度 = 行数 * 25 + 10 (Padding)
+                worksheet.row_dimensions[current_row_idx].height = (max_lines * 25) + 10
 
+    try:
+        # 使用 openpyxl 引擎写入
+        with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
+            
+            # --- Sheet 1: Master Schedule ---
+            timetable_df = pd.DataFrame.from_dict(timetable, orient="index")[days]
+            timetable_df.index.name = "TimeSlot"
+            timetable_df.to_excel(writer, sheet_name="Master_Schedule")
+            
+            # 对 Master Schedule 应用格式
+            format_worksheet(writer.sheets["Master_Schedule"])
+            
+            # --- Sheet 2~N: Individual Track Schedules ---
+            all_tracks = sorted(groupwise_df['Track'].unique())
+            
+            for track in all_tracks:
+                sheet_name = "".join(c for c in str(track) if c.isalnum() or c in (' ', '_', '-'))[:30]
                 
-# Recalculate soft conflicts manually
-manual_soft_conflicts = 0
-
-for i, row_i in assignments_df.iterrows():
-    course_i = row_i["Course"]
-    slot_i = row_i["TimeSlot"]
-    half_i = row_i["Half"]
-    groups_i = set(groupwise_df[groupwise_df["Course"] == course_i]["Group"])
-    
-    # Expand half: Long overlaps with H1 and H2
-    halves_to_check = {"Long"} if half_i == "Long" else {half_i, "Long"}
-    
-    for j, row_j in assignments_df.iterrows():
-        if i == j:
-            continue
-        if row_j["TimeSlot"] != slot_i:
-            continue
-        if row_j["Half"] not in halves_to_check:
-            continue
+                track_courses = groupwise_df[groupwise_df['Track'] == track]['Course'].unique()
+                track_assignments = assignments_df[assignments_df['Course'].isin(track_courses)]
+                
+                if track_assignments.empty:
+                    continue
+                    
+                track_timetable = {s: {d: "" for d in days} for s in slots}
+                
+                for _, row in track_assignments.iterrows():
+                    day, period = row["TimeSlot"].split("_")
+                    course_name = row['Course']
+                    
+                    tags = groupwise_df[
+                        (groupwise_df['Course'] == course_name) & 
+                        (groupwise_df['Track'] == track)
+                    ]['GroupTag']
+                    
+                    tag_label = ""
+                    if not tags.empty:
+                        tag_type = tags.iloc[0].lower()
+                        if 'mandatory' in tag_type:
+                            tag_label = " [M]"
+                        else:
+                            tag_label = " [R]"
+                    
+                    entry = f"{course_name}{tag_label}\n({row['Room']})" # 这里加了 \n 让教室名换行显示，更整洁
+                    
+                    current = track_timetable[period][day]
+                    track_timetable[period][day] = (current + "\n\n" + entry) if current else entry # 课程之间加两个换行
+                
+                track_df = pd.DataFrame.from_dict(track_timetable, orient="index")[days]
+                track_df.index.name = "TimeSlot"
+                track_df.to_excel(writer, sheet_name=sheet_name)
+                
+                # 对 Track Sheet 应用格式
+                format_worksheet(writer.sheets[sheet_name])
+                
+        print(f"\n📁 Timetable saved with FORMATTING to: {output_filename}")
         
-        course_j = row_j["Course"]
-        groups_j = set(groupwise_df[groupwise_df["Course"] == course_j]["Group"])
-        if groups_i & groups_j:
-            manual_soft_conflicts += 1
-            break  # count this course only once
+    except Exception as e:
+        print(f"Error saving Excel: {e}")
+        # Fallback
+        timetable_df = pd.DataFrame.from_dict(timetable, orient="index")[days]
+        timetable_df.to_excel("weekly_timetable_fall2025.xlsx")
 
-
-print("SoftConflict column sum:", total_soft_conflicts)
-print("Manually recomputed soft conflicts:", manual_soft_conflicts)
+else:
+    print("No assignments made.")
+    timetable_df = pd.DataFrame.from_dict(timetable, orient="index")[days]
+    timetable_df.to_excel("weekly_timetable_fall2025.xlsx")
